@@ -59,9 +59,52 @@ namespace SuperCopierPro
         }
     }
 
+    // ============ Barra de progreso con color propio ============
+    class BarraColor : ProgressBar
+    {
+        public Color ColorBarra = Color.FromArgb(0, 180, 100);
+        public Color ColorFondo = SystemColors.Control;
+        public Color ColorBorde = Color.FromArgb(80, 80, 80);
+
+        public BarraColor()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
+                     | ControlStyles.OptimizedDoubleBuffer, true);
+        }
+
+        public new int Value
+        {
+            get { return base.Value; }
+            set { base.Value = value; Invalidate(); }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var rect = ClientRectangle;
+            if (rect.Width <= 0 || rect.Height <= 0) return;
+
+            using (var bg = new SolidBrush(ColorFondo))
+                e.Graphics.FillRectangle(bg, rect);
+
+            double pct = Maximum > 0 ? (double)Value / Maximum : 0;
+            int w = (int)(rect.Width * pct);
+            if (w > 0)
+            {
+                using (var b = new SolidBrush(ColorBarra))
+                    e.Graphics.FillRectangle(b, new Rectangle(rect.X, rect.Y, w, rect.Height));
+            }
+
+            using (var pen = new Pen(ColorBorde))
+                e.Graphics.DrawRectangle(pen, 0, 0, rect.Width - 1, rect.Height - 1);
+        }
+    }
+
     class Principal : Form
     {
         const int TB = 1024 * 1024;
+
+        // --- Tema ---
+        bool temaOscuro = false;
 
         readonly List<Item> items = new List<Item>();
         readonly HashSet<string> rutasEnLista = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -78,15 +121,17 @@ namespace SuperCopierPro
         readonly CheckBox chkVerificar = new CheckBox { Text = "Verificar copia (SHA-256)", AutoSize = true };
         readonly NumericUpDown numReintentos = new NumericUpDown { Minimum = 0, Maximum = 10, Value = 3, Width = 50 };
         readonly NumericUpDown numDelayReint = new NumericUpDown { Minimum = 0, Maximum = 60, Value = 1, Width = 50 };
-        readonly Button btnAgregarArch = new Button { Text = "Agregar archivos", AutoSize = true };
-        readonly Button btnAgregarCarp = new Button { Text = "Agregar carpeta", AutoSize = true };
-        readonly Button btnQuitar = new Button { Text = "Quitar seleccionados", AutoSize = true };
-        readonly Button btnLimpiar = new Button { Text = "Limpiar lista", AutoSize = true };
+        readonly Button btnAgregarArch = new Button { Text = "📄 Agregar archivos", AutoSize = true };
+        readonly Button btnAgregarCarp = new Button { Text = "📁 Agregar carpeta", AutoSize = true };
+        readonly Button btnQuitar = new Button { Text = "🗑 Quitar", AutoSize = true };
+        readonly Button btnLimpiar = new Button { Text = "🧹 Limpiar", AutoSize = true };
         readonly Button btnIniciar = new Button { Text = "▶ Iniciar", AutoSize = true };
         readonly Button btnPausa = new Button { Text = "⏸ Pausar", AutoSize = true, Enabled = false };
         readonly Button btnCancelar = new Button { Text = "⏹ Cancelar", AutoSize = true, Enabled = false };
-        readonly ProgressBar barraTotal = new ProgressBar { Dock = DockStyle.Top, Height = 22, Maximum = 1000 };
-        readonly ProgressBar barraArchivo = new ProgressBar { Dock = DockStyle.Top, Height = 14, Maximum = 1000 };
+        readonly Button btnTema = new Button { Text = "🌙", AutoSize = true, Width = 40 };
+
+        readonly BarraColor barraTotal = new BarraColor { Dock = DockStyle.Top, Height = 22, Maximum = 1000 };
+        readonly BarraColor barraArchivo = new BarraColor { Dock = DockStyle.Top, Height = 14, Maximum = 1000 };
         readonly Label lblEstado = new Label { Dock = DockStyle.Fill, AutoEllipsis = true, Text = "Listo. Arrastra archivos o carpetas a la lista." };
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 500 };
 
@@ -111,20 +156,27 @@ namespace SuperCopierPro
             MinimumSize = new Size(760, 480);
             StartPosition = FormStartPosition.CenterScreen;
 
+            // Fuente moderna en toda la app
+            try { Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point); } catch { }
+
             // Icono de la ventana (toma el del .exe incrustado)
             try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+
+            // Doble buffer para evitar parpadeo
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             lista.Dock = DockStyle.Fill;
             lista.View = View.Details;
             lista.FullRowSelect = true;
             lista.GridLines = true;
             lista.AllowDrop = true;
-            lista.Columns.Add("Archivo", 300);
-            lista.Columns.Add("Carpeta origen", 250);
-            lista.Columns.Add("Tamaño", 90);
-            lista.Columns.Add("Progreso", 70);
-            lista.Columns.Add("Estado", 220);
-            lista.Columns.Add("Prioridad", 70);
+            lista.Columns.Add("📄 Archivo", 300);
+            lista.Columns.Add("📂 Carpeta origen", 250);
+            lista.Columns.Add("📏 Tamaño", 90);
+            lista.Columns.Add("📊 Progreso", 70);
+            lista.Columns.Add("✅ Estado", 220);
+            lista.Columns.Add("⚡ Prioridad", 70);
+
             lista.DragEnter += (s, e) =>
             {
                 if (!ejecutando && e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -153,7 +205,7 @@ namespace SuperCopierPro
             numLimite.ValueChanged += (s, e) =>
                 Interlocked.Exchange(ref limiteBps, (long)numLimite.Value * 1024 * 1024);
 
-            var btnDestino = new Button { Text = "…", AutoSize = true };
+            var btnDestino = new Button { Text = "📂", AutoSize = true };
             btnDestino.Click += (s, e) =>
             {
                 using (var d = new FolderBrowserDialog { Description = "Carpeta de destino" })
@@ -206,9 +258,22 @@ namespace SuperCopierPro
             {
                 if (pausa.IsSet) { pausa.Reset(); btnPausa.Text = "▶ Reanudar"; }
                 else { pausa.Set(); btnPausa.Text = "⏸ Pausar"; }
+                ActualizarColoresBarra();
             };
             btnCancelar.Click += (s, e) => { if (cts != null) cts.Cancel(); pausa.Set(); };
             timer.Tick += Tick;
+
+            // --- Toggle de tema ---
+            btnTema.Click += (s, e) =>
+            {
+                temaOscuro = !temaOscuro;
+                AplicarTema(this, temaOscuro);
+                btnTema.Text = temaOscuro ? "☀" : "🌙";
+                lista.BeginUpdate();
+                foreach (var it in items) RefrescarFila(it);
+                lista.EndUpdate();
+                ActualizarColoresBarra();
+            };
 
             var sup = new FlowLayoutPanel
             {
@@ -229,7 +294,8 @@ namespace SuperCopierPro
             f3.Controls.AddRange(new Control[]
             {
                 btnAgregarArch, btnAgregarCarp, btnQuitar, btnLimpiar,
-                new Label { Width = 30 }, btnIniciar, btnPausa, btnCancelar
+                new Label { Width = 30 }, btnIniciar, btnPausa, btnCancelar,
+                new Label { Width = 30 }, btnTema
             });
             sup.Controls.AddRange(new Control[] { f1, f2, f3 });
 
@@ -269,6 +335,75 @@ namespace SuperCopierPro
                 }
                 e.Cancel = true;
             };
+
+            // Aplicar tema inicial (claro) para que todo quede consistente
+            AplicarTema(this, temaOscuro);
+            ActualizarColoresBarra();
+        }
+
+        // ============ Tema ============
+        void AplicarTema(Control c, bool oscuro)
+        {
+            foreach (Control hijo in c.Controls) AplicarTema(hijo, oscuro);
+
+            Color fondo = oscuro ? Color.FromArgb(30, 30, 30) : SystemColors.Control;
+            Color fondoControl = oscuro ? Color.FromArgb(45, 45, 48) : SystemColors.Window;
+            Color texto = oscuro ? Color.FromArgb(230, 230, 230) : SystemColors.ControlText;
+            Color textoWindow = oscuro ? Color.FromArgb(230, 230, 230) : SystemColors.WindowText;
+            Color borde = oscuro ? Color.FromArgb(70, 70, 75) : SystemColors.ControlDark;
+
+            if (c is Form || c is Panel || c is FlowLayoutPanel)
+            {
+                c.BackColor = fondo;
+                if (c is Form) c.ForeColor = texto;
+            }
+            else if (c is ListView)
+            {
+                c.BackColor = oscuro ? Color.FromArgb(37, 37, 38) : SystemColors.Window;
+                c.ForeColor = textoWindow;
+            }
+            else if (c is TextBox || c is ComboBox || c is NumericUpDown)
+            {
+                c.BackColor = fondoControl;
+                c.ForeColor = textoWindow;
+            }
+            else if (c is Button)
+            {
+                var b = (Button)c;
+                b.FlatStyle = oscuro ? FlatStyle.Flat : FlatStyle.Standard;
+                b.BackColor = oscuro ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
+                b.ForeColor = texto;
+                if (oscuro) b.FlatAppearance.BorderColor = borde;
+            }
+            else if (c is Label)
+            {
+                c.ForeColor = texto;
+            }
+            else if (c is RadioButton || c is CheckBox)
+            {
+                c.ForeColor = texto;
+            }
+            else if (c is BarraColor)
+            {
+                var bc = (BarraColor)c;
+                bc.ColorFondo = oscuro ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
+                bc.ColorBorde = borde;
+                bc.Invalidate();
+            }
+        }
+
+        void ActualizarColoresBarra()
+        {
+            Color color;
+            if (!pausa.IsSet) color = Color.FromArgb(255, 165, 0);            // naranja: pausa
+            else if (items.Any(i => i.Estado == Estado.Error)) color = Color.FromArgb(220, 60, 60);  // rojo: errores
+            else if (ejecutando) color = Color.FromArgb(0, 180, 100);          // verde: copiando
+            else color = Color.FromArgb(0, 122, 204);                          // azul: inactivo
+
+            barraTotal.ColorBarra = color;
+            barraArchivo.ColorBarra = color;
+            barraTotal.Invalidate();
+            barraArchivo.Invalidate();
         }
 
         static Label Lbl(string t) { return new Label { Text = t, AutoSize = true, Margin = new Padding(8, 7, 3, 0) }; }
@@ -369,6 +504,7 @@ namespace SuperCopierPro
             btnPausa.Text = "⏸ Pausar";
             EstadoUI(true);
             timer.Start();
+            ActualizarColoresBarra();
 
             var copia = items
                 .OrderBy(i => i.Prioridad)
@@ -393,9 +529,18 @@ namespace SuperCopierPro
             barraTotal.Value = ca == 0 ? 1000 : barraTotal.Value;
             lblEstado.Text = "Terminado: " + ok + " completados, " + om + " omitidos, " + er + " con error, " + ca + " cancelados.";
             EstadoUI(false);
+            ActualizarColoresBarra();
 
             if (cerrarAlTerminar) { Close(); return; }
-            System.Media.SystemSounds.Asterisk.Play();
+
+            // Sonido según resultado
+            try
+            {
+                if (er > 0) System.Media.SystemSounds.Hand.Play();
+                else if (ca > 0) System.Media.SystemSounds.Exclamation.Play();
+                else System.Media.SystemSounds.Asterisk.Play();
+            }
+            catch { }
         }
 
         void EstadoUI(bool corriendo)
@@ -735,7 +880,9 @@ namespace SuperCopierPro
                 case Estado.Error: f.ForeColor = Color.Firebrick; break;
                 case Estado.Omitido: f.ForeColor = Color.Gray; break;
                 case Estado.Cancelado: f.ForeColor = Color.DarkOrange; break;
-                default: f.ForeColor = SystemColors.WindowText; break;
+                default:
+                    f.ForeColor = temaOscuro ? Color.FromArgb(220, 220, 220) : SystemColors.WindowText;
+                    break;
             }
         }
 
@@ -775,6 +922,8 @@ namespace SuperCopierPro
             lblEstado.Text = estadoTxt + ": " + Fmt(h) + " / " + Fmt(totalBytes) + "  |  " + Fmt((long)velMedia) + "/s  |  " +
                              "Restante: " + eta + "  |  Archivos: " + hechos + "/" + items.Count +
                              (a != null ? "  |  Actual: " + Path.GetFileName(a.Origen) : "");
+
+            ActualizarColoresBarra();
         }
 
         static int Clamp(int v, int min, int max)
