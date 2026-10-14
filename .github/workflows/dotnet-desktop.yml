@@ -10,7 +10,7 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - name: Build
-        run: dotnet publish -r win-x64 -c Release
+        run: dotnet publish SuperCopierPro/SuperCopierPro.csproj -r win-x64 -c Releasee
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
