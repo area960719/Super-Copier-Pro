@@ -24,5 +24,12 @@ jobs:
       - name: Build
         run: dotnet build Super-Copier-Pro.csproj --configuration Release --no-restore
 
-      - name: Publish artifacts
+      - name: Publish
         run: dotnet publish Super-Copier-Pro.csproj -c Release -o ./artifacts --no-build
+
+      # ESTE ES EL PASO QUE FALTABA: Subir la carpeta artifacts a GitHub
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Super-Copier-Pro-App
+          path: ./artifacts/
