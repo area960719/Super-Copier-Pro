@@ -1,16 +1,28 @@
 name: Build SuperCopierPro
-on: [push]
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 8.0.x
-      - name: Build
+
+      - name: Restore dependencies
+        run: dotnet restore SuperCopierPro.csproj
+
+      - name: Build project
         run: dotnet publish SuperCopierPro.csproj -r win-x64 -c Release
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
