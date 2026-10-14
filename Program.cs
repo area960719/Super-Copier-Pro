@@ -111,6 +111,9 @@ namespace SuperCopierPro
             MinimumSize = new Size(760, 480);
             StartPosition = FormStartPosition.CenterScreen;
 
+            // Icono de la ventana (toma el del .exe incrustado)
+            try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+
             lista.Dock = DockStyle.Fill;
             lista.View = View.Details;
             lista.FullRowSelect = true;
