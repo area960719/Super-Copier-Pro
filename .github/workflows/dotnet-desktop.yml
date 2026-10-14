@@ -12,7 +12,7 @@ jobs:
       - name: Build
         run: dotnet publish -r win-x64 -c Release
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: SuperCopierPro
           path: SuperCopierPro/bin/Release/net8.0/win-x64/publish/
