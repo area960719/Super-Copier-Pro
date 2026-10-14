@@ -51,11 +51,11 @@ namespace SuperCopierPro
     static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Principal());
+            Application.Run(new Principal(args));
         }
     }
 
@@ -149,7 +149,7 @@ namespace SuperCopierPro
         double velMedia;
         volatile Item actual;
 
-        public Principal()
+        public Principal(string[] args)
         {
             Text = "SuperCopier Pro";
             Size = new Size(1000, 640);
@@ -339,6 +339,26 @@ namespace SuperCopierPro
             // Aplicar tema inicial (claro) para que todo quede consistente
             AplicarTema(this, temaOscuro);
             ActualizarColoresBarra();
+
+            // Si nos han pasado rutas por línea de comandos (menú contextual), cargarlas
+            if (args != null && args.Length > 0) ProcesarArgumentos(args);
+        }
+
+        // ============ Argumentos (integración con menú contextual) ============
+        void ProcesarArgumentos(string[] args)
+        {
+            EnLote(() =>
+            {
+                foreach (var a in args)
+                {
+                    try
+                    {
+                        if (Directory.Exists(a)) AgregarCarpeta(a);
+                        else if (File.Exists(a)) AgregarArchivo(a, Path.GetFileName(a));
+                    }
+                    catch { }
+                }
+            });
         }
 
         // ============ Tema ============
