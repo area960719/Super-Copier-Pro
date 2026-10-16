@@ -1,9 +1,11 @@
+using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,10 +41,7 @@ namespace SuperCopierPro
                     "SuperCopierPro.log"
                 );
                 string linea = "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "] " + mensaje + Environment.NewLine;
-                lock (_lock)
-                {
-                    File.AppendAllText(rutaLog, linea);
-                }
+                lock (_lock) { File.AppendAllText(rutaLog, linea); }
             }
             catch { }
         }
@@ -82,10 +81,7 @@ namespace SuperCopierPro
         {
             var rect = ClientRectangle;
             if (rect.Width <= 0 || rect.Height <= 0) return;
-
-            using (var bg = new SolidBrush(ColorFondo))
-                e.Graphics.FillRectangle(bg, rect);
-
+            using (var bg = new SolidBrush(ColorFondo)) e.Graphics.FillRectangle(bg, rect);
             double pct = Maximum > 0 ? (double)Value / Maximum : 0;
             int w = (int)(rect.Width * pct);
             if (w > 0)
@@ -93,7 +89,6 @@ namespace SuperCopierPro
                 using (var b = new SolidBrush(ColorBarra))
                     e.Graphics.FillRectangle(b, new Rectangle(rect.X, rect.Y, w, rect.Height));
             }
-
             using (var pen = new Pen(ColorBorde))
                 e.Graphics.DrawRectangle(pen, 0, 0, rect.Width - 1, rect.Height - 1);
         }
@@ -105,6 +100,28 @@ namespace SuperCopierPro
 
         // --- Tema ---
         bool temaOscuro = false;
+
+        // --- Bandeja y salida ---
+        readonly NotifyIcon tray = new NotifyIcon();
+        readonly ContextMenuStrip trayMenu = new ContextMenuStrip();
+        ToolStripMenuItem menuInicioWindows;
+        bool salirDeVerdad = false;
+        bool iniciarMinimizado = false;
+        bool yaMostroAvisoTray = false;
+
+        // --- Atajo global ---
+        const int WM_HOTKEY = 0x0312;
+        const int HOTKEY_ID_COPIAR = 0x1001;
+        const uint MOD_ALT = 0x0001;
+        const uint MOD_CONTROL = 0x0002;
+
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        const string RunValue = "SuperCopierPro";
 
         readonly List<Item> items = new List<Item>();
         readonly HashSet<string> rutasEnLista = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -129,6 +146,7 @@ namespace SuperCopierPro
         readonly Button btnPausa = new Button { Text = "⏸ Pausar", AutoSize = true, Enabled = false };
         readonly Button btnCancelar = new Button { Text = "⏹ Cancelar", AutoSize = true, Enabled = false };
         readonly Button btnTema = new Button { Text = "🌙", AutoSize = true, Width = 40 };
+        readonly Button btnPortapapeles = new Button { Text = "📋 Del portapapeles", AutoSize = true };
 
         readonly BarraColor barraTotal = new BarraColor { Dock = DockStyle.Top, Height = 22, Maximum = 1000 };
         readonly BarraColor barraArchivo = new BarraColor { Dock = DockStyle.Top, Height = 14, Maximum = 1000 };
@@ -151,18 +169,22 @@ namespace SuperCopierPro
 
         public Principal(string[] args)
         {
+            // Filtrar --minimizado antes de procesar rutas
+            string[] rutas = null;
+            if (args != null && args.Length > 0)
+            {
+                iniciarMinimizado = args.Any(a => string.Equals(a, "--minimizado", StringComparison.OrdinalIgnoreCase));
+                rutas = args.Where(a => !string.Equals(a, "--minimizado", StringComparison.OrdinalIgnoreCase)).ToArray();
+            }
+
             Text = "SuperCopier Pro";
             Size = new Size(1000, 640);
             MinimumSize = new Size(760, 480);
             StartPosition = FormStartPosition.CenterScreen;
 
-            // Fuente moderna en toda la app
             try { Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point); } catch { }
-
-            // Icono de la ventana (toma el del .exe incrustado)
             try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-            // Doble buffer para evitar parpadeo
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             lista.Dock = DockStyle.Fill;
@@ -263,7 +285,6 @@ namespace SuperCopierPro
             btnCancelar.Click += (s, e) => { if (cts != null) cts.Cancel(); pausa.Set(); };
             timer.Tick += Tick;
 
-            // --- Toggle de tema ---
             btnTema.Click += (s, e) =>
             {
                 temaOscuro = !temaOscuro;
@@ -274,6 +295,8 @@ namespace SuperCopierPro
                 lista.EndUpdate();
                 ActualizarColoresBarra();
             };
+
+            btnPortapapeles.Click += (s, e) => PegarDesdePortapapeles();
 
             var sup = new FlowLayoutPanel
             {
@@ -293,7 +316,7 @@ namespace SuperCopierPro
             var f3 = new FlowLayoutPanel { AutoSize = true };
             f3.Controls.AddRange(new Control[]
             {
-                btnAgregarArch, btnAgregarCarp, btnQuitar, btnLimpiar,
+                btnAgregarArch, btnAgregarCarp, btnPortapapeles, btnQuitar, btnLimpiar,
                 new Label { Width = 30 }, btnIniciar, btnPausa, btnCancelar,
                 new Label { Width = 30 }, btnTema
             });
@@ -306,9 +329,7 @@ namespace SuperCopierPro
 
             var panelDetalles = new FlowLayoutPanel
             {
-                Dock = DockStyle.Bottom,
-                AutoSize = true,
-                FlowDirection = FlowDirection.LeftToRight
+                Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.LeftToRight
             };
             panelDetalles.Controls.AddRange(new Control[]
             {
@@ -323,28 +344,222 @@ namespace SuperCopierPro
             Controls.Add(inf);
             Controls.Add(sup);
 
-            FormClosing += (s, e) =>
+            FormClosing += Principal_FormClosing;
+
+            AplicarTema(this, temaOscuro);
+            ActualizarColoresBarra();
+
+            InicializarTray();
+
+            if (rutas != null && rutas.Length > 0) ProcesarArgumentos(rutas);
+        }
+
+        // ============ Bandeja del sistema ============
+        void InicializarTray()
+        {
+            try
             {
-                if (!ejecutando) return;
+                try { tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+                catch { tray.Icon = SystemIcons.Application; }
+                tray.Text = "SuperCopier Pro\nCtrl+Alt+V = copiar del portapapeles";
+
+                var mnuAbrir = new ToolStripMenuItem("Abrir SuperCopier");
+                mnuAbrir.Click += (s, e) => MostrarVentana();
+
+                var mnuPegar = new ToolStripMenuItem("Copiar del portapapeles   (Ctrl+Alt+V)");
+                mnuPegar.Click += (s, e) => PegarDesdePortapapeles();
+
+                menuInicioWindows = new ToolStripMenuItem("Iniciar con Windows");
+                menuInicioWindows.CheckOnClick = true;
+                menuInicioWindows.Checked = EstaInicioConWindows();
+                menuInicioWindows.CheckedChanged += (s, e) =>
+                {
+                    SetInicioConWindows(menuInicioWindows.Checked);
+                    menuInicioWindows.Checked = EstaInicioConWindows();
+                };
+
+                var mnuSalir = new ToolStripMenuItem("Salir");
+                mnuSalir.Click += (s, e) =>
+                {
+                    if (ejecutando)
+                    {
+                        if (MessageBox.Show(this, "Hay una copia en curso. ¿Cancelar y salir?",
+                            "SuperCopier Pro", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                            return;
+                        cerrarAlTerminar = true;
+                        if (cts != null) cts.Cancel();
+                        pausa.Set();
+                        salirDeVerdad = true;
+                        return;
+                    }
+                    salirDeVerdad = true;
+                    Close();
+                };
+
+                trayMenu.Items.Add(mnuAbrir);
+                trayMenu.Items.Add(mnuPegar);
+                trayMenu.Items.Add(new ToolStripSeparator());
+                trayMenu.Items.Add(menuInicioWindows);
+                trayMenu.Items.Add(new ToolStripSeparator());
+                trayMenu.Items.Add(mnuSalir);
+
+                tray.ContextMenuStrip = trayMenu;
+                tray.DoubleClick += (s, e) => MostrarVentana();
+                tray.Visible = true;
+            }
+            catch { }
+        }
+
+        void MostrarVentana()
+        {
+            try
+            {
+                Show();
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                ShowInTaskbar = true;
+                Activate();
+                BringToFront();
+            }
+            catch { }
+        }
+
+        void Principal_FormClosing(object s, FormClosingEventArgs e)
+        {
+            if (salirDeVerdad)
+            {
+                try { UnregisterHotKey(Handle, HOTKEY_ID_COPIAR); } catch { }
+                try { tray.Visible = false; tray.Dispose(); } catch { }
+                return;
+            }
+
+            if (ejecutando)
+            {
                 if (MessageBox.Show("Hay una copia en curso. ¿Cancelar y salir?", "SuperCopier Pro",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
                 {
                     cerrarAlTerminar = true;
+                    salirDeVerdad = true;
                     if (cts != null) cts.Cancel();
                     pausa.Set();
                 }
                 e.Cancel = true;
-            };
+                return;
+            }
 
-            // Aplicar tema inicial (claro) para que todo quede consistente
-            AplicarTema(this, temaOscuro);
-            ActualizarColoresBarra();
-
-            // Si nos han pasado rutas por línea de comandos (menú contextual), cargarlas
-            if (args != null && args.Length > 0) ProcesarArgumentos(args);
+            // Cerrar con X → ocultar a la bandeja
+            e.Cancel = true;
+            Hide();
+            ShowInTaskbar = false;
+            if (!yaMostroAvisoTray)
+            {
+                yaMostroAvisoTray = true;
+                try
+                {
+                    tray.BalloonTipTitle = "SuperCopier Pro sigue activo";
+                    tray.BalloonTipText = "Ctrl+Alt+V para copiar lo que tengas en el portapapeles. Doble clic en el icono para abrirlo.";
+                    tray.ShowBalloonTip(4000);
+                }
+                catch { }
+            }
         }
 
-        // ============ Argumentos (integración con menú contextual) ============
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try { RegisterHotKey(Handle, HOTKEY_ID_COPIAR, MOD_CONTROL | MOD_ALT, (uint)Keys.V); }
+            catch { }
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            try { UnregisterHotKey(Handle, HOTKEY_ID_COPIAR); } catch { }
+            base.OnHandleDestroyed(e);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HOTKEY_ID_COPIAR)
+                PegarDesdePortapapeles();
+            base.WndProc(ref m);
+        }
+
+        protected override void SetVisibleCore(bool value)
+        {
+            if (value && iniciarMinimizado && !IsHandleCreated)
+            {
+                // Arrancar oculto cuando se lanza desde el inicio de Windows
+                base.SetVisibleCore(false);
+                return;
+            }
+            base.SetVisibleCore(value);
+        }
+
+        // ============ Portapapeles ============
+        void PegarDesdePortapapeles()
+        {
+            try
+            {
+                if (!Clipboard.ContainsFileDropList())
+                {
+                    MostrarVentana();
+                    lblEstado.Text = "El portapapeles no tiene archivos (copia algo con Ctrl+C primero).";
+                    return;
+                }
+                var rutas = Clipboard.GetFileDropList();
+                if (rutas.Count == 0) return;
+
+                MostrarVentana();
+
+                EnLote(() =>
+                {
+                    foreach (string r in rutas)
+                    {
+                        try
+                        {
+                            if (Directory.Exists(r)) AgregarCarpeta(r);
+                            else if (File.Exists(r)) AgregarArchivo(r, Path.GetFileName(r));
+                        }
+                        catch { }
+                    }
+                });
+            }
+            catch { }
+        }
+
+        // ============ Inicio con Windows (registro) ============
+        bool EstaInicioConWindows()
+        {
+            try
+            {
+                using (var rk = Registry.CurrentUser.OpenSubKey(RunKey, false))
+                {
+                    if (rk == null) return false;
+                    return rk.GetValue(RunValue) != null;
+                }
+            }
+            catch { return false; }
+        }
+
+        void SetInicioConWindows(bool activar)
+        {
+            try
+            {
+                using (var rk = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (rk == null) return;
+                    if (activar)
+                        rk.SetValue(RunValue, "\"" + Application.ExecutablePath + "\" --minimizado");
+                    else
+                        rk.DeleteValue(RunValue, false);
+                }
+            }
+            catch
+            {
+                MessageBox.Show("No se pudo modificar el registro (¿permisos?).", "SuperCopier Pro");
+            }
+        }
+
+        // ============ Argumentos ============
         void ProcesarArgumentos(string[] args)
         {
             EnLote(() =>
@@ -415,10 +630,10 @@ namespace SuperCopierPro
         void ActualizarColoresBarra()
         {
             Color color;
-            if (!pausa.IsSet) color = Color.FromArgb(255, 165, 0);            // naranja: pausa
-            else if (items.Any(i => i.Estado == Estado.Error)) color = Color.FromArgb(220, 60, 60);  // rojo: errores
-            else if (ejecutando) color = Color.FromArgb(0, 180, 100);          // verde: copiando
-            else color = Color.FromArgb(0, 122, 204);                          // azul: inactivo
+            if (!pausa.IsSet) color = Color.FromArgb(255, 165, 0);
+            else if (items.Any(i => i.Estado == Estado.Error)) color = Color.FromArgb(220, 60, 60);
+            else if (ejecutando) color = Color.FromArgb(0, 180, 100);
+            else color = Color.FromArgb(0, 122, 204);
 
             barraTotal.ColorBarra = color;
             barraArchivo.ColorBarra = color;
@@ -526,10 +741,7 @@ namespace SuperCopierPro
             timer.Start();
             ActualizarColoresBarra();
 
-            var copia = items
-                .OrderBy(i => i.Prioridad)
-                .ThenBy(i => i.Rel)
-                .ToList();
+            var copia = items.OrderBy(i => i.Prioridad).ThenBy(i => i.Rel).ToList();
 
             try { await Task.Run(() => Procesar(copia, destRoot, mover, col, verificar, maxReintentos, delayReintSeg, cts.Token)); }
             catch (Exception ex) { MessageBox.Show("Error: " + ex.Message); }
@@ -551,9 +763,8 @@ namespace SuperCopierPro
             EstadoUI(false);
             ActualizarColoresBarra();
 
-            if (cerrarAlTerminar) { Close(); return; }
+            if (cerrarAlTerminar) { salirDeVerdad = true; Close(); return; }
 
-            // Sonido según resultado
             try
             {
                 if (er > 0) System.Media.SystemSounds.Hand.Play();
@@ -567,7 +778,7 @@ namespace SuperCopierPro
         {
             ejecutando = corriendo;
             btnIniciar.Enabled = btnAgregarArch.Enabled = btnAgregarCarp.Enabled =
-                btnQuitar.Enabled = btnLimpiar.Enabled = !corriendo;
+                btnQuitar.Enabled = btnLimpiar.Enabled = btnPortapapeles.Enabled = !corriendo;
             btnPausa.Enabled = btnCancelar.Enabled = corriendo;
             rbCopiar.Enabled = rbMover.Enabled = txtDestino.Enabled = cmbColision.Enabled =
                 chkVerificar.Enabled = chkSuperMover.Enabled = !corriendo;
@@ -732,7 +943,6 @@ namespace SuperCopierPro
 
             var buffer = new byte[tamBuffer];
             var dummy = new byte[tamBuffer];
-
             SHA256Managed hasher = verificar ? new SHA256Managed() : null;
 
             try
@@ -753,11 +963,7 @@ namespace SuperCopierPro
                     int n;
                     while ((n = await src.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
                     {
-                        if (!pausa.IsSet)
-                        {
-                            pausa.Wait(ct);
-                            sw.Restart(); enVentana = 0;
-                        }
+                        if (!pausa.IsSet) { pausa.Wait(ct); sw.Restart(); enVentana = 0; }
                         await dst.WriteAsync(buffer, 0, n, ct);
                         if (hasher != null) hasher.TransformBlock(buffer, 0, n, dummy, 0);
                         it.Copiado += n;
@@ -765,11 +971,7 @@ namespace SuperCopierPro
                         enVentana += n;
 
                         long lim = Interlocked.Read(ref limiteBps);
-                        if (lim != limPrev)
-                        {
-                            limPrev = lim;
-                            sw.Restart(); enVentana = 0;
-                        }
+                        if (lim != limPrev) { limPrev = lim; sw.Restart(); enVentana = 0; }
                         else if (lim > 0)
                         {
                             long esperadoMs = enVentana * 1000 / lim;
