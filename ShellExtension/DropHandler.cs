@@ -51,9 +51,11 @@ namespace SuperCopierShellExt
         }
 
         // ============ Extracción de rutas de SharpShell ============
-        private string[] GetPaths(IDataObject dataObject)
+        // Usamos System.Runtime.InteropServices.ComTypes.IDataObject para evitar ambigüedad con Windows.Forms
+        private string[] GetPaths(System.Runtime.InteropServices.ComTypes.IDataObject dataObject)
         {
             if (dataObject == null) return null;
+            
             var format = new FORMATETC
             {
                 cfFormat = (short)DataFormats.GetFormat(DataFormats.FileDrop).Id,
@@ -61,6 +63,7 @@ namespace SuperCopierShellExt
                 lindex = -1,
                 tymed = TYMED.TYMED_HGLOBAL
             };
+            
             STGMEDIUM medium;
             dataObject.GetData(ref format, out medium);
 
