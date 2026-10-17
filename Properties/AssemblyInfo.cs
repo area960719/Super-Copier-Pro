@@ -1,17 +1,13 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("SuperCopier Pro")]
-[assembly: AssemblyDescription("Copiador y movedor de archivos con verificación SHA-256")]
-[assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("L.A")]
+[assembly: AssemblyTitle("SuperCopierShellExt")]
+[assembly: AssemblyDescription("Extensión de Shell para SuperCopier Pro")]
+[assembly: AssemblyCompany("Luis Alberto")]
 [assembly: AssemblyProduct("SuperCopier Pro")]
-[assembly: AssemblyCopyright("Copyright © 2026")]
-[assembly: AssemblyTrademark("")]
-[assembly: AssemblyCulture("")]
-
-[assembly: ComVisible(false)]
-[assembly: Guid("A1B2C3D4-E5F6-7890-1234-567890ABCDEF")]
-
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
+
+// Hace visible el ensamblado a COM. Esencial para que la extensión funcione.
+[assembly: ComVisible(true)]
+[assembly: Guid("F1A2B3C4-D5E6-7890-1234-567890ABCDEF")]
