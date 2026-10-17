@@ -1,51 +1,59 @@
 @echo off
 title Instalador SuperCopier Pro
-echo ====================================================
-echo Instalando SuperCopier Shell Extension...
-echo ====================================================
-echo.
+color 0B
 
-:: Verificar si se está ejecutando como administrador
+:: 1. Solicitar permisos de Administrador automáticamente
 net session >nul 2>&1
-if %errorLevel% == 0 (
-    echo [OK] Ejecutando con privilegios de administrador.
-) else (
-    echo [ADVERTENCIA] No se esta ejecutando como administrador.
-    echo Es muy probable que la instalacion falle.
-    echo.
-    echo Por favor, cierra esta ventana, haz clic derecho en el archivo
-    echo y selecciona "Ejecutar como administrador".
-    echo.
-    pause
+if %errorLevel% neq 0 (
+    echo Solicitando permisos de administrador...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
 
-echo.
-echo Registrando la DLL en Windows...
+echo ====================================================
+echo   INSTALADOR DE SUPERCOPIER PRO
+echo ====================================================
 echo.
 
-:: Intentar usar regasm de 64 bits (lo normal en PCs modernas)
+:: 2. Crear la carpeta de instalación
+set "INSTALL_DIR=C:\Apps\SuperCopier"
+echo [1/4] Creando carpeta en %INSTALL_DIR%...
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+echo.
+
+:: 3. Copiar los archivos
+echo [2/4] Copiando archivos...
+copy /Y "%~dp0Super-Copier-Pro.exe" "%INSTALL_DIR%\" >nul
+copy /Y "%~dp0SuperCopierShellExt.dll" "%INSTALL_DIR%\" >nul
+echo Archivos copiados correctamente.
+echo.
+
+:: 4. Registrar la extensión de Shell
+echo [3/4] Registrando extension en Windows...
 if exist "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\regasm.exe" (
-    "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\regasm.exe" /codebase "%~dp0SuperCopierShellExt.dll"
+    "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\regasm.exe" /codebase "%INSTALL_DIR%\SuperCopierShellExt.dll"
 ) else (
-    :: Si falla, usar el de 32 bits
-    "%WINDIR%\Microsoft.NET\Framework\v4.0.30319\regasm.exe" /codebase "%~dp0SuperCopierShellExt.dll"
+    "%WINDIR%\Microsoft.NET\Framework\v4.0.30319\regasm.exe" /codebase "%INSTALL_DIR%\SuperCopierShellExt.dll"
 )
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [ERROR] Hubo un problema al registrar la DLL.
-    echo Asegurate de que el archivo SuperCopierShellExt.dll este en esta misma carpeta.
-) else (
-    echo.
-    echo [OK] Extension registrada correctamente.
+    pause
+    exit /b
 )
-
 echo.
+
+:: 5. Crear acceso directo en el Escritorio
+echo [4/4] Creando acceso directo en el Escritorio...
+powershell -Command "$WS = New-Object -ComObject WScript.Shell; $SC = $WS.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'SuperCopier Pro.lnk')); $SC.TargetPath = '%INSTALL_DIR%\Super-Copier-Pro.exe'; $SC.WorkingDirectory = '%INSTALL_DIR%'; $SC.Save()"
+echo.
+
 echo ====================================================
-echo IMPORTANTE:
-echo Debes reiniciar el Explorador de Windows o reiniciar
-echo la PC para que los cambios surtan efecto.
+echo   ¡INSTALACION COMPLETADA CON EXITO!
 echo ====================================================
+echo.
+echo Reinicia tu PC (o el Explorador de Windows) para que 
+echo el arrastrar y soltar funcione.
 echo.
 pause
